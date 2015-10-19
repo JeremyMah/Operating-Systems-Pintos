@@ -1,0 +1,206 @@
+			+--------------------+
+			|	   CS 153    |
+			| PROJECT 1: THREADS |
+			|   DESIGN DOCUMENT  |
+			+--------------------+
+				   
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Ryan Rivas	<rriva002@ucr.edu>
+Jeremy Mah	<jmah002@ucr.edu>
+
+			     ALARM CLOCK
+			     ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+"thread.h"
+int64_t sleep_time; 
+-A member variable to store the tick value from timer_sleep function.
+int64_t sleep_time_start;
+-A member variable to store the time elapsed. 
+struct semaphore sleep_sema;
+-Creates a semaphore to put the thread to sleep.
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In struct thread:
+int64_t sleep_time - Stores the number of ticks to sleep.
+int64_t sleep_time_start - Stores the sleep start time (given by timer_ticks ()).
+struct semaphore sleep_sema - Semaphore that handles the thread's sleep via timer_sleep ().
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+It first checks for valid ticks argument ( ticks > 0).
+Then it stores ticks in sleep_time and assigns sleep_time_start to the number of ticks 
+since the OS booted. Then the thread's sleep_sema is initialized and set "down" to make the thread
+to sleep. The timer interrupt handler calls timer_wake on each thread, which wakes up threads if
+they have been sleeping for the appropriate number of ticks.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+
+-The amount of time spent in the timer interrupt handler is minimized when we 
+removed the busy waiting. We also had a list of threads waiting to be woken up,
+which saves time from being spent in the timer interrupt handler by checking
+whether or not the thread is ready to be woken up.
+
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+
+Race conditions are avoided by giving each thread its own semaphore (see sleep_sema above).
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+
+Race conditions are avoided when a timer interrupt occurs by disabling 
+interrupts in the timer sleep function and using semaphores to put threads to sleep.
+Then you re-enable the interrupt after the semaphores have been initialized.
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+We decided to use semaphores to implement this because they are easy to work with. 
+We originally considered using monitors, but when we tried to use monitors, we did 
+not get the correct results and felt that semaphores were easier to use.
+
+			 PRIORITY SCHEDULING
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+"thread.h"
+int donated_priority;
+-Variable holding the priority donated.
+struct list waiters;
+-A list of threads waiting for the thread holding a lock.
+struct list_elem wait_elem;
+-A list element for the list of waiters.
+struct lock *wait_lock;
+-Pointer to the lock that the thread is waiting for.
+struct thread *max_priority(struct list *);
+- Searches through a list of threads and returns the thread with  
+   highest priority.
+
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+
++-----------------------+     						+-----------------------+
+| Thread 1              |						| Thread 2              |
+| priority = 64         |		+---------------------+   	| priority = 32         |
+| donated_priority = 0  |  ->	        | Lock 1              |   ->	| donated_priority = 64 | -->next line 
+| waiting_on: lock 1    |		| holder = Thread 2   |		| waiting_on: lock 2    |               
+| owned_locks: none     |		+---------------------+		| owned_locks: lock 1   |      
++-----------------------+						+-----------------------+
+							+-----------------------+
+							| Thread 3              |
+		 +---------------------+		| priority = 24         |
+--->	         | Lock 2              |	--->	| donated_priority = 64 |
+		 | holder = Thread 3   |		| waiting_on: none      |
+		 +---------------------+		| owned_locks: lock 2   |
+							+-----------------------+
+	
+This picture illustrates the data structure used to track priority donation.
+The thread first calls lock_aquire() to determine if the lock has an owner. 
+If the lock has an owner it calls thread_priority_donate() which donates the
+highest priority to the lock's owner. For nested donations, thread_priority_donate
+checks if the thread passed to it is waiting for a lock, then it calls 
+priority_donate to give the current thread the highest priority. This will go on
+until a thread is no longer waiting on another thread.
+
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+
+-Condition variables, semaphores and locks (via the threads holding the locks) maintain
+a list of waiting threads. When one of these threads needs to wake up, the one with the
+highest priority is chosen.
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+
+-As explained in B2, The thread first calls lock_aquire() to determine if the lock has an owner. 
+If the lock is currently being held by a thread with a lower priority, the current thread donates
+its priority to the lock holder and any threads the holder is waiting on, and any threads those
+threads are waiting on, and so on.
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+
+The lock holder loses its donated priority and any threads waiting for the lock are removed from
+the holder's list of waiting threads. The holder gains the highest priority of any other threads
+waiting for it, then ceases to hold the lock. The lock's semaphore then goes up, causing the
+highest priority thread waiting on the lock to wake up and acquire the lock.
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+
+A potential race in thread_set_priority() would be if the priority of the thread retrieved by
+next_thread_to_run() changes priority before its priority is compared to that of the current
+thread. Our implementation doesn't avoid it, but a lock could be used to ensure only one thread's
+priority can be changed for the duration of the function.
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+Maintaining lists of waiting threads and searching for the highest priority in each one seemed to be
+the simplest way to keep track of which threads were waiting for each type of synchronization. We
+considered using sorted lists, but that would have resulted in O(nlogn) insertion and O(1) extraction,
+which seemed less efficient that the O(1) insertion and O(n) extraction that our implementation uses.
+
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
+

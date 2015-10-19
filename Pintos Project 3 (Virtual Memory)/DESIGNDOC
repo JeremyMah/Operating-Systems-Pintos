@@ -1,0 +1,164 @@
+			+---------------------------+
+			|          CS 153           |
+			| PROJECT 3: VIRTUAL MEMORY |
+			|      DESIGN DOCUMENT      |
+			+---------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Ryan Rivas rriva002@ucr.edu
+Jeremy Mah jmah002@ucr.edu
+
+			PAGE TABLE MANAGEMENT
+			=====================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct frame - Represents a mapping between a virtual address and a
+	       physical address in memory.
+struct list frame_table - A list of frames currently mapped to virtual
+			  addresses.
+struct lock frame_lock - Provides synchronization for the frame table.
+struct spt_entry - Additional information for a page table entry.
+struct list spt - Supplemental page table; contains additional
+		  information for page table entries of each process.
+struct lock spt_lock - Provides synchronization for the supplemental
+		       page table.
+
+---- ALGORITHMS ----
+
+>> A2: In a few paragraphs, describe your code for locating the frame,
+>> if any, that contains the data of a given page.
+
+The list frame_table is searched iteratively for a struct frame that
+contains a given virtual address corresponding to the current process.
+If it finds one, the struct frame's address variable is a pointer to
+the frame that contains the data of the page corresponding to the given
+virtual address.
+
+>> A3: How does your code coordinate accessed and dirty bits between
+>> kernel and user virtual addresses that alias a single frame, or
+>> alternatively how do you avoid the issue?
+
+The issue of coordination of the accessed and dirty bits has been
+avoided by using only user virtual addresses to alias frames.
+
+---- SYNCHRONIZATION ----
+
+>> A4: When two user processes both need a new frame at the same time,
+>> how are races avoided?
+
+Each function that accesses the frame table uses a lock to ensure that
+only one process can access the frame table at a time.
+
+---- RATIONALE ----
+
+>> A5: Why did you choose the data structure(s) that you did for
+>> representing virtual-to-physical mappings?
+
+Using a list provided a simple way to implement LRU. Accessed frames
+are moved to the end of the list; when a page needs to be evicted,
+the frame at the front of the list is the least recently used.
+
+		       PAGING TO AND FROM DISK
+		       =======================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct swap - Stores data for a frame copied to the swap partition.
+struct list swap_list - A list containing data for frames in the swap
+			partition.
+struct lock swap_lock - Provides synchronization for the swap
+			partition.
+
+---- ALGORITHMS ----
+
+>> B2: When a frame is required but none is free, some frame must be
+>> evicted.  Describe your code for choosing a frame to evict.
+
+When a frame is accessed, it's moved to the end of the list that
+represents the frame table. When a page needs to be evicted, the page
+at the front of the list is the least recently used frame, so it's
+evicted (and written to the swap partition if necessary). This results
+in an LRU replacement policy.
+
+>> B3: When a process P obtains a frame that was previously used by a
+>> process Q, how do you adjust the page table (and any other data
+>> structures) to reflect the frame Q no longer has?
+
+Each struct frame in the frame table keeps track of the thread that
+owns it; if P obtains a frame used by Q, then Q's frame will have been
+evicted and a new struct frame will be added to the frame table that
+reflects P's ownership of the frame.
+
+>> B4: Explain your heuristic for deciding whether a page fault for an
+>> invalid virtual address should cause the stack to be extended into
+>> the page that faulted.
+
+If the page fault occurred between PHYS_BASE and up to 32 bytes below
+the stack pointer, then the stack is extended.
+
+---- SYNCHRONIZATION ----
+
+>> B5: Explain the basics of your VM synchronization design.  In
+>> particular, explain how it prevents deadlock.  (Refer to the
+>> textbook for an explanation of the necessary conditions for
+>> deadlock.)
+
+The frame table, supplemental page table and swap partition each have a
+corresponding lock to implement synchronization. A process can have
+both the frame table lock and the swap partition lock, but in each case
+where these two locks are needed, the locks are acquired in the same
+order to prevent deadlock.
+
+>> B6: A page fault in process P can cause another process Q's frame
+>> to be evicted.  How do you ensure that Q cannot access or modify
+>> the page during the eviction process?  How do you avoid a race
+>> between P evicting Q's frame and Q faulting the page back in?
+
+Access to the frame table is protected by a lock, so only one process
+can access a frame in the frame table at a time.
+
+>> B7: Suppose a page fault in process P causes a page to be read from
+>> the file system or swap.  How do you ensure that a second process Q
+>> cannot interfere by e.g. attempting to evict the frame while it is
+>> still being read in?
+
+Access to the frame table and swap partition are protected by locks, so
+only one process can access either one at a time. Frames are evicted
+and inserted at opposite ends of the list representing the frame table,
+so a frame can't be evicted while it's being read in.
+
+>> B8: Explain how you handle access to paged-out pages that occur
+>> during system calls.  Do you use page faults to bring in pages (as
+>> in user programs), or do you have a mechanism for "locking" frames
+>> into physical memory, or do you use some other design?  How do you
+>> gracefully handle attempted accesses to invalid virtual addresses?
+
+Page faults are used to bring in pages. Virtual addresses are checked
+for validity during a page fault, causing the process to exit if
+necessary.
+
+---- RATIONALE ----
+
+>> B9: A single lock for the whole VM system would make
+>> synchronization easy, but limit parallelism.  On the other hand,
+>> using many locks complicates synchronization and raises the
+>> possibility for deadlock but allows for high parallelism.  Explain
+>> where your design falls along this continuum and why you chose to
+>> design it this way.
+
+Multiple locks were used (one for each new data structure), but
+deadlock is avoided by careful use of the locks. This design provided
+more flexibility in synchronization while avoiding the risk of
+deadlock.
